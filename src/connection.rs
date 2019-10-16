@@ -90,11 +90,12 @@ where
         let id = connection.next_stream_id()?;
         let mut frame = Frame::window_update(id, connection.config.receive_window);
         frame.header_mut().syn();
+        println!("add window update pending");
         connection.add_pending(frame.into_raw())?;
         let stream = StreamEntry::new(connection.config.receive_window, DEFAULT_CREDIT);
         let buffer = stream.buffer.clone();
         connection.streams.insert(id, stream);
-        debug!("{}: {}: outgoing stream of {:?}", connection.id, id, *connection);
+        println!("{}: {}: outgoing stream of {:?}", connection.id, id, *connection);
         Ok(Some(StreamHandle::new(id, buffer, self.clone())))
     }
 
@@ -141,6 +142,7 @@ where
 
     /// Poll connection for incoming data
     pub fn poll(&self) -> Poll<Option<StreamHandle<T>>, ConnectionError> {
+        println!("connection poll");
         let mut connection = Use::with(self.inner.lock(), Action::Destroy);
 
         if connection.status != ConnStatus::Open {
@@ -152,7 +154,7 @@ where
         while let Some(id) = connection.incoming.pop_front() {
             let stream =
                 if let Some(stream) = connection.streams.get(&id) {
-                    debug!("{}: {}: incoming stream of {:?}", connection.id, id, *connection);
+                    println!("{}: {}: incoming stream of {:?}", connection.id, id, *connection);
                     StreamHandle::new(id, stream.buffer.clone(), self.clone())
                 } else {
                     continue
@@ -351,7 +353,7 @@ where
         // resource, in order not to risk missing a notification.
         self.tasks.insert_current();
         while let Some(frame) = self.pending.pop_front() {
-            trace!("{}: {}: send: {:?}", self.id, frame.header.stream_id, frame.header);
+            println!("{}: {}: send: {:?}", self.id, frame.header.stream_id, frame.header);
             if let AsyncSink::NotReady(frame) = self.resource.start_send_notify(frame, &self.tasks, 0)? {
                 if self.pending.len() >= self.config.max_pending_frames {
                     return Err(ConnectionError::TooManyPendingFrames)
@@ -375,7 +377,7 @@ where
             self.flush_pending()?;
             match self.resource.poll_stream_notify(&self.tasks, 0)? {
                 Async::Ready(Some(frame)) => {
-                    trace!("{}: {}: recv: {:?}", self.id, frame.header.stream_id, frame.header);
+                    println!("{}: {}: recv: {:?}", self.id, frame.header.stream_id, frame.header);
                     let response = match frame.dyn_type() {
                         Type::Data =>
                             self.on_data(Frame::assert(frame))?.map(Frame::into_raw),
@@ -394,11 +396,12 @@ where
                     self.tasks.notify_all();
                 }
                 Async::Ready(None) => {
-                    trace!("{}: eof: {:?}", self.id, self);
+                    println!("{}: eof: {:?}", self.id, self);
                     self.kill();
                     return Ok(Async::Ready(()))
                 }
                 Async::NotReady => {
+                    println!("poll_stream_notify not ready");
                     return Ok(Async::NotReady)
                 }
             }
@@ -407,7 +410,7 @@ where
 
     fn on_data(&mut self, frame: Frame<Data>) -> Result<Option<Frame<GoAway>>, ConnectionError> {
         let stream_id = frame.header().id();
-
+        println!("on_data");
         if frame.header().flags().contains(RST) { // stream reset
             debug!("{}: {}: received reset for stream", self.id, stream_id);
             if let Some(s) = self.streams.get_mut(&stream_id) {
@@ -482,7 +485,7 @@ where
 
     fn on_window_update(&mut self, frame: &Frame<WindowUpdate>) -> Result<Option<Frame<GoAway>>, ConnectionError> {
         let stream_id = frame.header().id();
-
+        println!("on_window_update");
         if frame.header().flags().contains(RST) { // stream reset
             debug!("{}: {}: received reset for stream", self.id, stream_id);
             if let Some(s) = self.streams.get_mut(&stream_id) {
@@ -527,7 +530,7 @@ where
 
     fn on_ping(&mut self, frame: &Frame<Ping>) -> Option<Frame<Ping>> {
         let stream_id = frame.header().id();
-
+        println!("on_ping");
         if frame.header().flags().contains(ACK) { // pong
             return None
         }
@@ -615,7 +618,7 @@ where
 {
     fn drop(&mut self) {
         let mut inner = self.connection.inner.lock();
-        debug!("{}: {}: dropping stream", inner.id, self.id);
+        println!("{}: {}: dropping stream", inner.id, self.id);
         let _ = inner.reset(self.id);
     }
 }
@@ -625,6 +628,7 @@ where
     T: AsyncRead + AsyncWrite
 {
     fn read(&mut self, buf: &mut[u8]) -> io::Result<usize> {
+
         let mut inner = Use::with(self.connection.inner.lock(), Action::Destroy);
         if !inner.config.read_after_close && inner.status != ConnStatus::Open {
             return Ok(0)
@@ -663,6 +667,7 @@ where
             }
 
             if inner.config.window_update_mode == WindowUpdateMode::OnRead {
+                println!("WindowUpdateMode OnRead");
                 let inner = &mut *inner;
                 let frame =
                     if let Some(stream) = inner.streams.get_mut(&self.id) {
@@ -681,7 +686,7 @@ where
                         .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?
                 }
             }
-
+            println!("read process");
             match inner.process_incoming() {
                 Err(e) => return Err(io::Error::new(io::ErrorKind::Other, e)),
                 Ok(Async::NotReady) => {
@@ -716,6 +721,7 @@ where
     T: AsyncRead + AsyncWrite
 {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        println!("write:{:?}", buf);
         let mut inner = Use::with(self.connection.inner.lock(), Action::Destroy);
         if inner.status != ConnStatus::Open {
             return Err(io::Error::new(io::ErrorKind::WriteZero, "connection is closed"))

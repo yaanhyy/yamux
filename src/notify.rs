@@ -43,6 +43,7 @@ impl Notifier {
     pub fn notify_all(&self) {
         let mut tasks = self.tasks.lock();
         for (_, t) in tasks.drain() {
+            println!("notify_all task id:{:?}", t);
             t.notify();
         }
     }
@@ -55,6 +56,7 @@ impl Notifier {
 
 impl executor::Notify for Notifier {
     fn notify(&self, _: usize) {
+        println!("executor::Notify");
         self.notify_all()
     }
 }

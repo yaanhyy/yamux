@@ -23,9 +23,11 @@ use yamux::{Config, Connection, Mode, StreamHandle, State};
 
 #[test]
 fn prop_send_recv() {
-    fn prop(msgs: Vec<Msg>) -> TestResult {
+    fn prop(msgs: Vec<Msg>) {
+        //-> TestResult {
         if msgs.is_empty() {
-            return TestResult::discard()
+            return ()
+            //return TestResult::discard()
         }
         let (l, a) = bind();
         let cfg = Config::default();
@@ -34,17 +36,24 @@ fn prop_send_recv() {
         let num_requests = msgs.len();
         let iter = msgs.into_iter().map(Bytes::from);
         let stream = iter.clone();
+        let i = Ipv4Addr::new(127, 0, 0, 1);
+        let a = SocketAddr::V4(SocketAddrV4::new(i, 4765));
         let client = client(cfg, a).and_then(move |c| loop_send_recv(c, codec, stream));
         let responses = run(server, client);
-        TestResult::from_bool(
-            responses.len() == num_requests &&
-            responses.into_iter().map(|m| m.freeze()).eq(iter))
+//        TestResult::from_bool(
+//            responses.len() == num_requests &&
+//            responses.into_iter().map(|m| m.freeze()).eq(iter))
     }
 
     // A single run with up to QUICKCHECK_GENERATOR_SIZE messages
-    QuickCheck::new()
-        .tests(1)
-        .quickcheck(prop as fn(_) -> _);
+//    QuickCheck::new()
+//        .tests(1)
+//        .quickcheck(prop as fn(_) -> _);
+    let mut msgs = Vec::new();
+    msgs.push(Msg(vec![48,49,50]));
+  //  msgs.push(Msg(vec![65,66,67]));
+  //  msgs.push(Msg("abc".to_string().into_bytes()));
+    prop(msgs);
 }
 
 #[test]
@@ -148,7 +157,7 @@ impl Arbitrary for Msg {
 
 fn bind() -> (TcpListener, SocketAddr) {
     let i = Ipv4Addr::new(127, 0, 0, 1);
-    let s = SocketAddr::V4(SocketAddrV4::new(i, 0));
+    let s = SocketAddr::V4(SocketAddrV4::new(i, 9999));
     let l = TcpListener::bind(&s).unwrap();
     let a = l.local_addr().unwrap();
     (l, a)
@@ -159,13 +168,13 @@ fn server(c: Config, l: TcpListener) -> impl Future<Item = Connection<TcpStream>
         .map(move |sock| Connection::new(sock, c.clone(), Mode::Server))
         .into_future()
         .map_err(|(e, _rem)| error!("accept failed: {}", e))
-        .and_then(|(maybe, _rem)| maybe.ok_or(()))
+        .and_then(|(maybe, _rem)| {println!("server_map");maybe.ok_or(())})
 }
 
 fn client(c: Config, a: SocketAddr) -> impl Future<Item = Connection<TcpStream>, Error = ()> {
     TcpStream::connect(&a)
         .map_err(|e| error!("connect failed: {}", e))
-        .map(move |sock| Connection::new(sock, c, Mode::Client))
+        .map(move |sock| {println!("client_map");Connection::new(sock, c, Mode::Client)})
 }
 
 /// Read `n` frames from each incoming stream on the connection and echo them
@@ -175,7 +184,7 @@ where
     D: Encoder<Error = io::Error> + Decoder<Error = io::Error> + Copy,
     <D as Encoder>::Item: From<<D as Decoder>::Item>
 {
-    c.for_each(move |stream| {
+    let c = c.for_each(move |stream| {
         let (stream_out, stream_in) = Framed::new(stream, d).split();
         stream_in
             .take(n)
@@ -183,7 +192,8 @@ where
             .forward(stream_out)
             .from_err()
             .map(|_| ())
-    }).map_err(|e| error!("S: connection error: {}", e))
+    }).map_err(|e| error!("S: connection error: {}", e));
+    c
 }
 
 /// Sequentially send a sequence of messages on a connection, with a new
@@ -198,10 +208,11 @@ where
     <D as Decoder>::Item: Debug,
     <D as Decoder>::Error: Debug + Display,
 {
+    println!("in loop_send_recv");
     future::loop_fn((vec![], i), move |(mut v, mut it)| {
         let msg = match it.next() {
             Some(msg) => {
-                debug!("C: sending: {:?}", msg);
+                println!("C: sending: {:?}", msg);
                 msg
             }
             None => {
@@ -211,13 +222,13 @@ where
         };
         match c.open_stream() {
             Ok(Some(stream)) => {
-                debug!("C: new stream: {:?}", stream);
+                println!("C: new stream: {:?}", stream);
                 let codec = Framed::new(stream, d.clone());
                 let future = codec.send(msg)
                     .map_err(|e| error!("C: send error: {}", e))
                     .and_then(move |codec| {
-                        codec.collect().and_then(move |data| {
-                            debug!("C: received {:?}", data);
+                        codec.collect().and_then(move  |data| {
+                            println!("C: received {:?}", data);
                             v.extend(data);
                             Ok(Loop::Continue((v, it)))
                         })
@@ -252,7 +263,7 @@ where
     R: Send + 'static
 {
     let mut rt = Runtime::new().unwrap();
-    rt.spawn(server);
+    //rt.spawn(server);
     client.wait().unwrap()
 }
 
