@@ -351,6 +351,7 @@ where
         // The current task must be registered with `self.tasks` *before*
         // calling `start_send_notify` or `poll_flush_notify` on the underlying
         // resource, in order not to risk missing a notification.
+        println!("flush_pending");
         self.tasks.insert_current();
         while let Some(frame) = self.pending.pop_front() {
             println!("{}: {}: send: {:?}", self.id, frame.header.stream_id, frame.header);
@@ -370,6 +371,7 @@ where
 
     fn process_incoming(&mut self) -> Poll<(), ConnectionError> {
         loop {
+            println!("process_incoming");
             // Relies on `flush_pending` always registering the current task with `self.tasks`.
             // The current task must be registered with `self.tasks` *before* calling
             // `poll_stream_notify` on the underlying resource, in order not to risk missing
@@ -755,6 +757,7 @@ where
                 return Err(io::Error::new(io::ErrorKind::WriteZero, "stream is closed"))
             }
         };
+        println!("out write body:{:?}", frame);
         let n = frame.body.len();
         inner.add_pending(frame).map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
         Ok(n)
@@ -765,6 +768,7 @@ where
         if inner.status != ConnStatus::Open {
             return Ok(())
         }
+        println!("flush");
         match inner.flush_pending() {
             Err(e) => Err(io::Error::new(io::ErrorKind::Other, e)),
             Ok(Async::NotReady) => {
