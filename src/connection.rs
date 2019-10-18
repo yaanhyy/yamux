@@ -354,7 +354,7 @@ where
         println!("flush_pending");
         self.tasks.insert_current();
         while let Some(frame) = self.pending.pop_front() {
-            println!("{}: {}: send: {:?}", self.id, frame.header.stream_id, frame.header);
+            println!("{}: {}: send: {:?}, body:{:?}", self.id, frame.header.stream_id, frame.header, frame.body);
             if let AsyncSink::NotReady(frame) = self.resource.start_send_notify(frame, &self.tasks, 0)? {
                 if self.pending.len() >= self.config.max_pending_frames {
                     return Err(ConnectionError::TooManyPendingFrames)
@@ -469,7 +469,7 @@ where
                     stream.window = stream.window.saturating_sub(frame.body().len() as u32);
                     stream.buffer.lock().push(frame.into_body());
                     if !is_finish && stream.window == 0 && self.config.window_update_mode == WindowUpdateMode::OnReceive {
-                        trace!("{}: {}: sending window update", self.id, stream_id);
+                        println!("{}: {}: sending window update", self.id, stream_id);
                         stream.window = self.config.receive_window;
                         Frame::window_update(stream_id, self.config.receive_window)
                     } else {
